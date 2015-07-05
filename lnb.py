@@ -126,6 +126,13 @@ produce improved performance, constitutes the Less Naive Bayes algorithm.
 """
 
 # TODO:
+# - Improve logic for addition of new layers.
+# - Consider revamping for off-line training: Train each layer on full data
+#   set, and then determine whether to add a new layer, revert to an
+#   earlier layer, or stop.
+# - It appears that using an INBClassifier with bias of 0 works better.
+#   Do some intensive tests to verify. Consider setting defaults
+#   accordingly, and revamping documentation.
 # - Implement non-categorical (linear) conditions.
 # - Modify NB and INB implementations to work with log probabilities
 #   instead of raw counts.
@@ -253,17 +260,18 @@ class INBClassifier(Classifier):
     predicted categories is a necessary quality of the subclassifiers used
     in the Less Naive Bayes algorithm."""
 
-    def __init__(self, features=None, categories=None):
+    def __init__(self, features=None, categories=None, bias=None):
         self._priors = dict.fromkeys(categories or (), 0)
         self._conditionals = {feature: {} for feature in features or ()}
         self._accuracy = .5
         self._observation_counter = 0
 
-    def observe(self, features, category, weight=None, bias=None):
+        self._bias = 1 if bias is None else bias
+
+    def observe(self, features, category, weight=None):
         """Update the model based on the features and category of the
         sample."""
-        if bias is None:
-            bias = 1
+
         if weight is None:
             weight = 1
 
@@ -284,7 +292,7 @@ class INBClassifier(Classifier):
         self._observation_counter += 1
         if predicted_category == category:
             accuracy_target = predicted_probability
-            update_size = weight * (1 + bias)
+            update_size = weight * (1 + self._bias)
         else:
             accuracy_target = 1 - predicted_probability
             update_size = weight
@@ -328,6 +336,13 @@ class INBClassifier(Classifier):
         return by_category
 
     @property
+    def bias(self):
+        """The degree to which the classifier prefers to continue making
+        the same mistakes when classification mistakes cannot be avoided.
+        """
+        return self._bias
+
+    @property
     def accuracy(self):
         """A moving average of the predictive accuracy of the classifier
         as the model is developed."""
@@ -365,7 +380,8 @@ class LNBClassifier(Classifier):
     classifications, but not necessarily to the correct probabilities.
     """
 
-    def __init__(self, features=None, categories=None, max_depth=None):
+    def __init__(self, features=None, categories=None, max_depth=None,
+                 bias=None):
         assert max_depth is None or max_depth >= 1
 
         self._features = frozenset(features or ())
@@ -376,7 +392,16 @@ class LNBClassifier(Classifier):
 
         self._max_depth = max_depth
 
-        self._layers = [INBClassifier(self._features)]
+        self._bias = 1 if bias is None else bias
+
+        self._layers = [INBClassifier(self._features, bias=self._bias)]
+
+    @property
+    def bias(self):
+        """The degree to which subclassifiers prefer to continue making
+        the same mistakes when classification mistakes cannot be avoided.
+        """
+        return self._bias
 
     @property
     def depth(self):
@@ -399,7 +424,9 @@ class LNBClassifier(Classifier):
         """Increment the depth by adding another subclassifier. If the
         depth has reached the maximum, do nothing."""
         if self._max_depth is None or len(self._layers) < self._max_depth:
-            self._layers.append(INBClassifier(self._features))
+            self._layers.append(
+                INBClassifier(self._features, bias=self._bias)
+            )
 
     def remove_layer(self):
         """Decrement the depth by removing the topmost subclassifier. If
@@ -407,7 +434,7 @@ class LNBClassifier(Classifier):
         if len(self._layers) > 1:
             self._layers.pop()
 
-    def observe(self, features, category, weight=None, bias=None):
+    def observe(self, features, category, weight=None):
         """Update the model based on the features and category of the
         sample."""
 
@@ -426,7 +453,7 @@ class LNBClassifier(Classifier):
 
         # Provide the new observation to each layer.
         for index, layer in enumerate(self._layers):
-            layer.observe(features, category, weight, bias)
+            layer.observe(features, category, weight)
             if index + 1 >= len(self._layers):
                 break
             predicted_category, probability = layer.classify(features)
@@ -525,9 +552,11 @@ class RandomBooleanFunction:
 if __name__ == "__main__":
     import random
     import string
+    import time
 
-    input_count = 4
+    input_count = 5
     even_probabilities = False
+    number_of_samples = 50000
 
     if even_probabilities:
         value_factories = [lambda: bool(random.randrange(2))] * input_count
@@ -546,10 +575,12 @@ if __name__ == "__main__":
         categorizer=categorizer
     )
 
-    def show(classifier, target_function):
+    def show(classifier, target_function, run_time, individual=False):
         """Pretty-print the classifier's conclusions for the samples it
         was provided."""
         print("Classifier type:", type(classifier).__name__)
+        if isinstance(classifier, (INBClassifier, LNBClassifier)):
+            print("Bias:", classifier.bias)
         if isinstance(classifier, LNBClassifier):
             print("Depth:", classifier.depth)
             print("Best depth:", classifier.best_depth)
@@ -580,27 +611,37 @@ if __name__ == "__main__":
                 predicted = probabilities.get(category, 0)
                 error += abs(target - predicted)
 
-                condition = ''.join(('~' if not value else '') + letter
-                                    for letter, value in features)
+                if individual:
+                    condition = ''.join(('~' if not value else '') + letter
+                                        for letter, value in features)
 
-                print('P(' + str(category) + '|' + condition + ') =',
-                      predicted, '(' + str(target) + ')')
-            print()
+                    print('P(' + str(category) + '|' + condition + ') =',
+                          predicted, '(' + str(target) + ')')
+
+            if individual:
+                print()
 
             category = max(target_probabilities,
                            key=target_probabilities.get)
             if category == max(probabilities, key=probabilities.get):
                 correct_count += 1
 
-        print("Correct classifications:", correct_count, "of", 1 << count)
+        percentage = str(round(correct_count / (1 << count) * 100, 1))
+        print("Correct classifications:",
+              correct_count, "of", 1 << count,
+              '(' + percentage + ' %)')
         print("Average error:", error / (1 << count))
+        print("Run time:", run_time, "seconds")
         print()
 
 
     nb_model = NBClassifier()
-    lnb_model = LNBClassifier()
+    unbiased_lnb_model = LNBClassifier(bias=0)
+    biased_lnb_model = LNBClassifier()
 
-    for model in nb_model, lnb_model:
-        model.train(sample_generator(5000))
-        show(model, categorizer)
+    for model in nb_model, unbiased_lnb_model, biased_lnb_model:
+        start_time = time.time()
+        model.train(sample_generator(number_of_samples))
+        end_time = time.time()
+        show(model, categorizer, end_time-start_time)
         print()
