@@ -129,6 +129,8 @@ produce improved performance, constitutes the Less Naive Bayes algorithm.
 # - Implement non-categorical (linear) conditions.
 # - Modify NB and INB implementations to work with log probabilities
 #   instead of raw counts.
+# - Allow features to be accompanied with counts to facilitate text
+#   classification.
 # - Restrict categories to be integers instead of arbitrary values and
 #   use this to effect a speedup by representing category sequences as
 #   bitstrings.
@@ -168,6 +170,11 @@ class Classifier(metaclass=ABCMeta):
         probabilities = self.probabilities(features)
         category = max(probabilities, key=probabilities.get)
         return category, probabilities[category]
+
+    def train(self, observations):
+        """Accept a sequence of multiple observations all at once."""
+        for features, category in observations:
+            self.observe(features, category)
 
 
 class NBClassifier(Classifier):
@@ -470,25 +477,45 @@ class LNBClassifier(Classifier):
         return results
 
 
+class SampleGenerator:
+    """A simple class to generate artificial samples according to a
+    probability distribution for testing purposes."""
+
+    def __init__(self, feature_names, value_factories, categorizer):
+        self.feature_names = tuple(feature_names)
+        self.value_factories = tuple(value_factories)
+        self.categorizer = categorizer
+
+        assert len(self.feature_names) == len(self.value_factories)
+
+    def make_sample(self):
+        """Create a new sample and return it."""
+        values = [factory() for factory in self.value_factories]
+        features = list(zip(self.feature_names, values))
+        category = self.categorizer(*values)
+        return features, category
+
+    def __call__(self, count):
+        """Create `count` new samples and return them in an iterator."""
+        for _ in range(count):
+            yield self.make_sample()
+
+
 if __name__ == "__main__":
     import random
 
-    def func(a, b):
-        #return a == b
-        #return a == b if random.randrange(3) else a != b
-        return a == (not b)
-        #return a and b
-
-    classifier = LNBClassifier()
-
-    def train(classifier, func, count=5000):
-        for _ in range(count):
-            a = bool(random.randrange(2))
-            b = bool(random.randrange(2))
-            c = func(a, b)
-            classifier.observe([('a', a), ('b', b)], c)
+    sample_generator = SampleGenerator(
+        feature_names=['a', 'b'],
+        value_factories=[
+            lambda: bool(random.randrange(2)),  # a
+            lambda: bool(random.randrange(2))   # b
+        ],
+        categorizer=lambda a, b: a == (not b)
+    )
 
     def show(classifier):
+        """Pretty-print the classifier's conclusions for the samples it
+        was provided."""
         print("Classifier type:", type(classifier).__name__)
         if isinstance(classifier, LNBClassifier):
             print("Depth:", classifier.depth)
@@ -496,11 +523,15 @@ if __name__ == "__main__":
         print()
         for a in (True, False):
             for b in (True, False):
-                probabilities = classifier.probabilities([('a', a), ('b', b)])
+                probabilities = classifier.probabilities([
+                    ('a', a),
+                    ('b', b)
+                ])
                 for c in sorted(probabilities, reverse=True):
                     print('P(' + str(c) + '|' + ('a' if a else '~a') +
                           ('b' if b else '~b') + ') =', probabilities[c])
                 print()
 
-    train(classifier, func)
-    show(classifier)
+    model = LNBClassifier()
+    model.train(sample_generator(5000))
+    show(model)
