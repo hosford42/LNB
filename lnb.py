@@ -501,19 +501,52 @@ class SampleGenerator:
             yield self.make_sample()
 
 
+class RandomBooleanFunction:
+    """A randomly generated probabilistic Boolean function, for testing."""
+
+    def __init__(self, input_count):
+        assert input_count >= 0
+        self.input_count = input_count
+        self.table = [
+            random.random()
+            for _ in range(1 << input_count)
+        ]
+
+    def __call__(self, *inputs):
+        assert len(inputs) == self.input_count
+        index = 0
+        for value in inputs:
+            assert value in (0, 1)
+            index <<= 1
+            index += value
+        return random.random() <= self.table[index]
+
+
 if __name__ == "__main__":
     import random
+    import string
+
+    input_count = 4
+    even_probabilities = False
+
+    if even_probabilities:
+        value_factories = [lambda: bool(random.randrange(2))] * input_count
+    else:
+        value_factories = []
+        for _ in range(input_count):
+            probability = random.random()
+            value_factory = lambda: random.random() <= probability
+            value_factories.append(value_factory)
+
+    categorizer = RandomBooleanFunction(input_count)
 
     sample_generator = SampleGenerator(
-        feature_names=['a', 'b'],
-        value_factories=[
-            lambda: bool(random.randrange(2)),  # a
-            lambda: bool(random.randrange(2))   # b
-        ],
-        categorizer=lambda a, b: a == (not b)
+        feature_names=string.ascii_lowercase[:input_count],
+        value_factories=value_factories,
+        categorizer=categorizer
     )
 
-    def show(classifier):
+    def show(classifier, target_function):
         """Pretty-print the classifier's conclusions for the samples it
         was provided."""
         print("Classifier type:", type(classifier).__name__)
@@ -521,17 +554,39 @@ if __name__ == "__main__":
             print("Depth:", classifier.depth)
             print("Best depth:", classifier.best_depth)
         print()
-        for a in (True, False):
-            for b in (True, False):
-                probabilities = classifier.probabilities([
-                    ('a', a),
-                    ('b', b)
-                ])
-                for c in sorted(probabilities, reverse=True):
-                    print('P(' + str(c) + '|' + ('a' if a else '~a') +
-                          ('b' if b else '~b') + ') =', probabilities[c])
-                print()
 
-    model = LNBClassifier()
-    model.train(sample_generator(5000))
-    show(model)
+        count = target_function.input_count
+
+        for index in range(1 << count):
+            target_probabilities = {
+                True: target_function.table[index],
+                False: 1 - target_function.table[index]
+            }
+
+            values = []
+            for _ in range(count):
+                values.insert(0, bool(index % 2))
+                index >>= 1
+
+            features = list(zip(string.ascii_lowercase[:count], values))
+
+            probabilities = classifier.probabilities(features)
+
+            for category in sorted(target_probabilities, reverse=True):
+                target = target_probabilities[category]
+                predicted = probabilities.get(category, 0)
+
+                condition = ''.join(('~' if not value else '') + letter
+                                    for letter, value in features)
+
+                print('P(' + str(category) + '|' + condition + ') =',
+                      predicted, '(' + str(target) + ')')
+            print()
+
+    nb_model = NBClassifier()
+    lnb_model = LNBClassifier()
+
+    for model in nb_model, lnb_model:
+        model.train(sample_generator(5000))
+        show(model, categorizer)
+        print()
