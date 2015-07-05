@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 """
 Less Naive Bayes
@@ -184,7 +185,6 @@ class NBClassifier(Classifier):
     def observe(self, features, category):
         """Update the model based on the features and category of the
         sample."""
-        features = frozenset(features)
 
         # If it's a previously unobserved category, add it to the table.
         if category not in self._priors:
@@ -202,7 +202,11 @@ class NBClassifier(Classifier):
     def probabilities(self, features):
         """Return a dictionary mapping each category to its predicted
         probability for the sample."""
-        features = frozenset(features)
+
+        # We will need to iterate over it more than once, so make sure that
+        # we can.
+        if not isinstance(features, (list, tuple)):
+            features = list(features)
 
         for feature in features:
             # If it's a previously unobserved feature, add it to the table.
@@ -256,7 +260,10 @@ class INBClassifier(Classifier):
         if weight is None:
             weight = 1
 
-        features = frozenset(features)
+        # We will need to iterate over it more than once, so make sure that
+        # we can.
+        if not isinstance(features, (list, tuple)):
+            features = list(features)
 
         # If it's a previously unobserved category, add it to the table.
         if category not in self._priors:
@@ -285,7 +292,11 @@ class INBClassifier(Classifier):
     def probabilities(self, features):
         """Return a dictionary mapping each category to its predicted
         probability for the sample."""
-        features = frozenset(features)
+
+        # We will need to iterate over it more than once, so make sure that
+        # we can.
+        if not isinstance(features, (list, tuple)):
+            features = list(features)
 
         for feature in features:
             # If it's a previously unobserved feature, add it to the table.
@@ -393,7 +404,11 @@ class LNBClassifier(Classifier):
         """Update the model based on the features and category of the
         sample."""
 
-        features = frozenset(features)
+        # We will need to iterate over it more than once, so make sure that
+        # we can.
+        if not isinstance(features, (list, tuple)):
+            features = list(features)
+
         original_category = category
         category = (original_category,)
 
