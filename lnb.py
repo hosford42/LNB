@@ -158,7 +158,7 @@ class Classifier(metaclass=ABCMeta):
         values representing (name, value) pairs."""
         raise NotImplementedError()
 
-    def predict(self, features):
+    def classify(self, features):
         """Given a set of features, return the most likely category for
         the sample and the probability of that category as predicted by the
         classifier's model of the sample space. Features should be passed
@@ -178,8 +178,8 @@ class NBClassifier(Classifier):
     a feature."""
 
     def __init__(self, features=None, categories=None):
-        self._totals = dict.fromkeys(categories or (), 0)
-        self._by_feature = {feature: {} for feature in features or ()}
+        self._priors = dict.fromkeys(categories or (), 0)
+        self._conditionals = {feature: {} for feature in features or ()}
 
     def observe(self, features, category):
         """Update the model based on the features and category of the
@@ -187,17 +187,17 @@ class NBClassifier(Classifier):
         features = frozenset(features)
 
         # If it's a previously unobserved category, add it to the table.
-        if category not in self._totals:
-            self._totals[category] = 0
+        if category not in self._priors:
+            self._priors[category] = 0
 
         # Increment the appropriate counters in the tables.
-        self._totals[category] += 1
+        self._priors[category] += 1
         for feature in features:
             # If it's a previously unobserved feature, add it to the table.
-            if feature not in self._by_feature:
-                self._by_feature[feature] = {}
-            self._by_feature[feature][category] = \
-                self._by_feature[feature].get(category, 0) + 1
+            if feature not in self._conditionals:
+                self._conditionals[feature] = {}
+            self._conditionals[feature][category] = \
+                self._conditionals[feature].get(category, 0) + 1
 
     def probabilities(self, features):
         """Return a dictionary mapping each category to its predicted
@@ -206,17 +206,17 @@ class NBClassifier(Classifier):
 
         for feature in features:
             # If it's a previously unobserved feature, add it to the table.
-            if feature not in self._by_feature:
-                self._by_feature = {}
+            if feature not in self._conditionals:
+                self._conditionals = {}
 
         by_category = {}
-        feature_count = len(self._by_feature)
-        for category, category_count in self._totals.items():
+        feature_count = len(self._conditionals)
+        for category, category_count in self._priors.items():
             smoothed_count = category_count + feature_count
             proportion = category_count + 1
             for feature in features:
                 proportion *= (
-                    (self._by_feature[feature].get(category, 0) + 1) /
+                    (self._conditionals[feature].get(category, 0) + 1) /
                     smoothed_count
                 )
             by_category[category] = proportion
@@ -243,8 +243,8 @@ class INBClassifier(Classifier):
     in the Less Naive Bayes algorithm."""
 
     def __init__(self, features=None, categories=None):
-        self._totals = dict.fromkeys(categories or (), 0)
-        self._by_feature = {feature: {} for feature in features or ()}
+        self._priors = dict.fromkeys(categories or (), 0)
+        self._conditionals = {feature: {} for feature in features or ()}
         self._accuracy = .5
         self._observation_counter = 0
 
@@ -259,14 +259,14 @@ class INBClassifier(Classifier):
         features = frozenset(features)
 
         # If it's a previously unobserved category, add it to the table.
-        if category not in self._totals:
-            self._totals[category] = 0
+        if category not in self._priors:
+            self._priors[category] = 0
 
         # The idea here is to reduce the update rate when the prediction
         # disagrees with the correct category, as compared to when they
         # agree, causing the predictions to stabilize even if the correct
         # mapping can't be learned.
-        predicted_category, predicted_probability = self.predict(features)
+        predicted_category, predicted_probability = self.classify(features)
         self._observation_counter += 1
         if predicted_category == category:
             accuracy_target = predicted_probability
@@ -277,10 +277,10 @@ class INBClassifier(Classifier):
         self._accuracy += \
             (accuracy_target - self._accuracy) / self._observation_counter
 
-        self._totals[category] += update_size
+        self._priors[category] += update_size
         for feature in features:
-            self._by_feature[feature][category] = \
-                self._by_feature[feature].get(category, 0) + update_size
+            self._conditionals[feature][category] = \
+                self._conditionals[feature].get(category, 0) + update_size
 
     def probabilities(self, features):
         """Return a dictionary mapping each category to its predicted
@@ -289,17 +289,17 @@ class INBClassifier(Classifier):
 
         for feature in features:
             # If it's a previously unobserved feature, add it to the table.
-            if feature not in self._by_feature:
-                self._by_feature[feature] = {}
+            if feature not in self._conditionals:
+                self._conditionals[feature] = {}
 
         by_category = {}
-        feature_count = len(self._by_feature)
-        for category, category_count in self._totals.items():
+        feature_count = len(self._conditionals)
+        for category, category_count in self._priors.items():
             smoothed_count = category_count + feature_count
             proportion = category_count + 1
             for feature in features:
                 proportion *= (
-                    (self._by_feature[feature].get(category, 0) + 1) /
+                    (self._conditionals[feature].get(category, 0) + 1) /
                     smoothed_count
                 )
             by_category[category] = proportion
@@ -334,7 +334,7 @@ class INBClassifier(Classifier):
     @property
     def categories(self):
         """The categories this classifier can return as predictions."""
-        return frozenset(self._totals)
+        return frozenset(self._priors)
 
 
 class LNBClassifier(Classifier):
@@ -407,7 +407,7 @@ class LNBClassifier(Classifier):
             layer.observe(features, category, weight, bias)
             if index + 1 >= len(self._layers):
                 break
-            predicted_category, probability = layer.predict(features)
+            predicted_category, probability = layer.classify(features)
             category = (predicted_category, original_category)
 
         # Only consider subclassifiers which have observed at least half
