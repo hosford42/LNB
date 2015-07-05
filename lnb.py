@@ -555,6 +555,9 @@ if __name__ == "__main__":
             print("Best depth:", classifier.best_depth)
         print()
 
+        correct_count = 0
+        error = 0
+
         count = target_function.input_count
 
         for index in range(1 << count):
@@ -575,6 +578,7 @@ if __name__ == "__main__":
             for category in sorted(target_probabilities, reverse=True):
                 target = target_probabilities[category]
                 predicted = probabilities.get(category, 0)
+                error += abs(target - predicted)
 
                 condition = ''.join(('~' if not value else '') + letter
                                     for letter, value in features)
@@ -582,6 +586,16 @@ if __name__ == "__main__":
                 print('P(' + str(category) + '|' + condition + ') =',
                       predicted, '(' + str(target) + ')')
             print()
+
+            category = max(target_probabilities,
+                           key=target_probabilities.get)
+            if category == max(probabilities, key=probabilities.get):
+                correct_count += 1
+
+        print("Correct classifications:", correct_count, "of", 1 << count)
+        print("Average error:", error / (1 << count))
+        print()
+
 
     nb_model = NBClassifier()
     lnb_model = LNBClassifier()
