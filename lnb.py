@@ -126,7 +126,19 @@ produce improved performance, constitutes the Less Naive Bayes algorithm.
 """
 
 # TODO:
-# - Improve logic for addition of new layers.
+# - Use my new term, "category forking", in the documentation to describe
+#   what this algorithm does.
+# - It should be possible to apply category forking to other classification
+#   algorithms, including neural networks. Write up and publish a paper
+#   describing category forking and how to use it to implement "wide
+#   learning" in ANNs -- i.e. by adding a new output node to the network,
+#   adding another layer after the outputs to sum them up appropriately,
+#   and then training the new node to predict when the old network would
+#   produce the incorrect/correct classification. (This is a very imprecise
+#   description, of course.)
+# - Improve logic for addition of new layers to keep them to the bare
+#   minimum required for good performance, since this drastically affects
+#   the speed of training.
 # - Consider revamping for off-line training: Train each layer on full data
 #   set, and then determine whether to add a new layer, revert to an
 #   earlier layer, or stop.
