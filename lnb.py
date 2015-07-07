@@ -347,12 +347,20 @@ class INBClassifier(Classifier):
             by_category[category] /= total
         return by_category
 
-    @property
-    def bias(self):
-        """The degree to which the classifier prefers to continue making
-        the same mistakes when classification mistakes cannot be avoided.
-        """
+    def _get_bias(self):
         return self._bias
+
+    def _set_bias(self, bias):
+        assert bias >= 0
+        self._bias = bias
+
+    bias = property(
+        _get_bias,
+        _set_bias,
+        doc="""The degree to which the classifier prefers to continue
+        making the same mistakes when classification mistakes cannot be
+        avoided."""
+    )
 
     @property
     def accuracy(self):
@@ -393,8 +401,9 @@ class LNBClassifier(Classifier):
     """
 
     def __init__(self, features=None, categories=None, max_depth=None,
-                 bias=None):
+                 bias=None, look_ahead=10):
         assert max_depth is None or max_depth >= 1
+        assert look_ahead >= 2
 
         self._features = frozenset(features or ())
         self._original_categories = frozenset(categories or ())
@@ -404,7 +413,8 @@ class LNBClassifier(Classifier):
 
         self._max_depth = max_depth
 
-        self._bias = 1 if bias is None else bias
+        self._bias = .01 if bias is None else bias
+        self._look_ahead = look_ahead
 
         self._layers = [INBClassifier(self._features, bias=self._bias)]
 
@@ -437,7 +447,7 @@ class LNBClassifier(Classifier):
         depth has reached the maximum, do nothing."""
         if self._max_depth is None or len(self._layers) < self._max_depth:
             self._layers.append(
-                INBClassifier(self._features, bias=self._bias)
+                INBClassifier(self._features, bias=0)
             )
 
     def remove_layer(self):
@@ -465,7 +475,8 @@ class LNBClassifier(Classifier):
 
         # Provide the new observation to each layer.
         for index, layer in enumerate(self._layers):
-            layer.observe(features, category, weight)
+            if index >= self._most_accurate_layer - self._look_ahead:
+                layer.observe(features, category, weight)
             if index + 1 >= len(self._layers):
                 break
             predicted_category, probability = layer.classify(features)
@@ -473,7 +484,7 @@ class LNBClassifier(Classifier):
 
         # Only consider subclassifiers which have observed at least half
         # of the total number of observations provided so far.
-        self._most_accurate_layer = max(
+        new_most_accurate_layer = max(
             (index for index in range(len(self._layers))
              if (not index or
                  (self._layers[index].observation_counter * 2 >=
@@ -481,22 +492,29 @@ class LNBClassifier(Classifier):
             key=lambda index: self._layers[index].conservative_accuracy
         )
 
-        # If the most recently added subclassifier has received enough
-        # observations to be considered, and is the most accurate
-        # subclassifier, add a new subclassifier. If the most recently
-        # added subclassifier is not the most accurate one, but has
-        # received at least half as many observations as the most accurate
-        # one, wipe out the subclassifiers after the most accurate one and
-        # start over.
-        if self._most_accurate_layer >= len(self._layers) - 1:
-            self.add_layer()
-        elif (self._layers[-1].observation_counter * 2 >=
-              self._layers[self._most_accurate_layer].observation_counter):
-            if (1 + self._most_accurate_layer) * 2 < len(self._layers):
-                while len(self._layers) > self._most_accurate_layer + 1:
-                    self.remove_layer()
-            else:
+        if new_most_accurate_layer != self._most_accurate_layer:
+            self._most_accurate_layer = new_most_accurate_layer
+            for index, layer in enumerate(self._layers):
+                if index <= self._most_accurate_layer:
+                    layer.bias = self._bias / (index + 1)
+                else:
+                    layer.bias = 0
+
+        most_accurate = self._layers[self._most_accurate_layer]
+        last = self._layers[-1]
+
+        upper_bound = len(self._layers) - self._look_ahead
+        lower_bound = len(self._layers) - 2 * self._look_ahead
+
+        if self._most_accurate_layer > upper_bound:
+            max_observations = max(layer.observation_counter
+                                   for layer in self._layers)
+            if (self._most_accurate_layer == len(self._layers) - 1 or
+                    last.observation_counter * 2 >= max_observations):
                 self.add_layer()
+        elif self._most_accurate_layer < lower_bound:
+            if last.accuracy < most_accurate.conservative_accuracy:
+                self.remove_layer()
 
     def probabilities(self, features):
         """Return a dictionary mapping each category to its predicted
@@ -514,6 +532,30 @@ class LNBClassifier(Classifier):
                 results.get(target_category, 0) + probability
 
         return results
+
+    def get_values(self, function):
+        """Return a list of values produced by passing each layer to the
+        given function. Useful primarily for debugging."""
+
+        return [function(layer) for layer in self._layers]
+
+
+def make_ascii_plot(values, height=10):
+    """Return a simple ASCII plot of the given values."""
+
+    min_value = min(values)
+    max_value = max(values)
+
+    rows = ['+' + '-' * len(values) + '+']
+    for index in range(height, 0, -1):
+        threshold = min_value + (max_value - min_value) * index / height
+        rows.append('|' + ''.join(
+            ('*' if value >= threshold else ' ')
+            for value in values
+        ) + '|')
+    rows.append('+' + '-' * len(values) + '+')
+
+    return '\n'.join(rows)
 
 
 class SampleGenerator:
@@ -646,12 +688,32 @@ if __name__ == "__main__":
         print("Run time:", run_time, "seconds")
         print()
 
+        if isinstance(classifier, LNBClassifier):
+            values = classifier.get_values(
+                lambda layer: layer.conservative_accuracy
+            )
+            print(make_ascii_plot(values))
+            print("Accuracy by layer")
+            print(min(values), '-', max(values))
+            print()
+
+            values = classifier.get_values(
+                lambda layer: layer.observation_counter
+            )
+            print(make_ascii_plot(values))
+            print("Age by layer")
+            print(min(values), '-', max(values))
+            print()
 
     nb_model = NBClassifier()
     unbiased_lnb_model = LNBClassifier(bias=0)
-    biased_lnb_model = LNBClassifier()
+    slightly_biased_lnb_model = LNBClassifier(bias=.01)
+    biased_lnb_model = LNBClassifier(bias=1)
 
-    for model in nb_model, unbiased_lnb_model, biased_lnb_model:
+    for model in (nb_model,
+                  unbiased_lnb_model,
+                  slightly_biased_lnb_model,
+                  biased_lnb_model):
         start_time = time.time()
         model.train(sample_generator(number_of_samples))
         end_time = time.time()
