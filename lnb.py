@@ -237,7 +237,7 @@ class NBClassifier(Classifier):
         for feature in features:
             # If it's a previously unobserved feature, add it to the table.
             if feature not in self._conditionals:
-                self._conditionals = {}
+                self._conditionals[feature] = {}
 
         by_category = {}
         feature_count = len(self._conditionals)
